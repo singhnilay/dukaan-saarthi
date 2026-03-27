@@ -126,7 +126,7 @@ export default function LoginPage() {
 
           <p className="text-xs text-center text-on-surface-variant font-medium">
             New to Dukaan Bright?{" "}
-            <a href="#" className="text-primary-container font-bold hover:underline">Create account</a>
+            <Link href="/register" className="text-primary-container font-bold hover:underline">Create account</Link>
           </p>
         </div>
       </section>
