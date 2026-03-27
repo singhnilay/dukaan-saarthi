@@ -1,28 +1,160 @@
 "use client";
-import { mockStats, mockProducts, mockChartData, mockInsights } from "@/lib/mockData";
+import { useEffect, useMemo, useState } from "react";
 import { formatCurrency } from "@/lib/utils";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid
 } from "recharts";
 import Link from "next/link";
-
-const alertProducts = mockProducts.filter(
-  (p) => p.stockStatus === "low" || p.stockStatus === "critical"
-).slice(0, 3);
-
-const expiringProducts = mockProducts.filter(
-  (p) => p.daysToExpiry !== undefined && p.daysToExpiry <= 30
-).slice(0, 3);
+import { createClient } from "@/lib/supabase/client";
+import type { AIInsight, ChartDataPoint, DashboardStats, Product } from "@/types";
 
 export default function DashboardPage() {
-  const stats = mockStats;
+  const [loading, setLoading] = useState(true);
+  const [shopName, setShopName] = useState("Your Shop");
+  const [stats, setStats] = useState<DashboardStats>({
+    todayProfit: 0,
+    todayRevenue: 0,
+    monthlyGoal: 0,
+    monthlyProgress: 0,
+    totalProducts: 0,
+    lowStockCount: 0,
+    expiringCount: 0,
+    topProduct: "N/A",
+  });
+  const [products, setProducts] = useState<Product[]>([]);
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+  const [insights, setInsights] = useState<AIInsight[]>([]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        const supabase = createClient();
+
+        const { data: userData } = await supabase.auth.getUser();
+        const user = userData.user;
+        if (!user) {
+          return;
+        }
+
+        const { data: shop } = await supabase
+          .from("shops")
+          .select("id, name")
+          .eq("owner_user_id", user.id)
+          .order("created_at", { ascending: true })
+          .maybeSingle();
+
+        if (!shop) {
+          return;
+        }
+
+        setShopName(shop.name ?? "Your Shop");
+
+        const [{ data: productRows }, { data: insightsRows }, { data: metricsRows }] =
+          await Promise.all([
+            supabase
+              .from("products")
+              .select("id, name, quantity, min_quantity, cost_price, selling_price, expiry_date, status")
+              .eq("shop_id", shop.id),
+            supabase
+              .from("ai_price_suggestions")
+              .select("id, product_id, type, reason, impact_text, current_price, suggested_price, priority")
+              .eq("shop_id", shop.id)
+              .order("created_at", { ascending: false })
+              .limit(3),
+            supabase
+              .from("daily_shop_metrics")
+              .select("day, revenue, gross_profit, net_profit")
+              .eq("shop_id", shop.id)
+              .order("day", { ascending: false })
+              .limit(7),
+          ]);
+
+        const mappedProducts: Product[] = (productRows ?? []).map((p) => {
+          const expiryDate = p.expiry_date ?? undefined;
+          const daysToExpiry = expiryDate
+            ? Math.ceil((new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+            : undefined;
+          return {
+            id: String(p.id),
+            name: p.name,
+            category: "General",
+            quantity: p.quantity ?? 0,
+            minQuantity: p.min_quantity ?? 0,
+            costPrice: Number(p.cost_price ?? 0),
+            sellingPrice: Number(p.selling_price ?? 0),
+            expiryDate,
+            stockStatus: (p.status as Product["stockStatus"]) ?? "healthy",
+            daysToExpiry,
+            trend: "stable",
+          };
+        });
+        setProducts(mappedProducts);
+
+        const mappedInsights: AIInsight[] = (insightsRows ?? []).map((i) => {
+          const productName = mappedProducts.find((p) => p.id === String(i.product_id))?.name ?? "Product";
+          return {
+            id: String(i.id),
+            productId: String(i.product_id),
+            productName,
+            type: (i.type as AIInsight["type"]) ?? "trending",
+            recommendation: i.reason ?? "No recommendation available",
+            impact: i.impact_text ?? "No impact estimate",
+            currentPrice: Number(i.current_price ?? 0),
+            suggestedPrice: i.suggested_price == null ? undefined : Number(i.suggested_price),
+            priority: (i.priority as AIInsight["priority"]) ?? "medium",
+          };
+        });
+        setInsights(mappedInsights);
+
+        const sortedMetrics = [...(metricsRows ?? [])].sort((a, b) => (a.day > b.day ? 1 : -1));
+        const mappedChart: ChartDataPoint[] = sortedMetrics.map((m) => ({
+          day: new Date(m.day).toLocaleDateString("en-IN", { weekday: "short" }),
+          revenue: Number(m.revenue ?? 0),
+          profit: Number(m.net_profit ?? m.gross_profit ?? 0),
+        }));
+        setChartData(mappedChart);
+
+        const todayMetric = sortedMetrics.at(-1);
+        const lowStockCount = mappedProducts.filter((p) => p.quantity <= p.minQuantity).length;
+        const expiringCount = mappedProducts.filter((p) => (p.daysToExpiry ?? 999) <= 30).length;
+        const topProduct = [...mappedProducts].sort((a, b) => b.quantity - a.quantity)[0]?.name ?? "N/A";
+
+        setStats({
+          todayProfit: Number(todayMetric?.net_profit ?? todayMetric?.gross_profit ?? 0),
+          todayRevenue: Number(todayMetric?.revenue ?? 0),
+          monthlyGoal: 0,
+          monthlyProgress: 0,
+          totalProducts: mappedProducts.length,
+          lowStockCount,
+          expiringCount,
+          topProduct,
+        });
+      } catch (error) {
+        console.error("Failed to load dashboard data:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void load();
+  }, []);
+
+  const alertProducts = useMemo(
+    () => products.filter((p) => p.stockStatus === "low" || p.stockStatus === "critical").slice(0, 3),
+    [products]
+  );
+  const expiringProducts = useMemo(
+    () => products.filter((p) => p.daysToExpiry !== undefined && p.daysToExpiry <= 30).slice(0, 3),
+    [products]
+  );
 
   return (
     <div className="space-y-10">
       {/* Hero Greeting */}
       <section className="animate-fade-in-up">
         <h2 className="text-4xl font-extrabold text-primary tracking-tight">
-          Good Morning, Rajesh
+          Good Morning, {shopName}
         </h2>
         <p className="text-on-surface-variant mt-1 text-lg font-medium">
           Your shop is doing well.{" "}
@@ -71,7 +203,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={mockChartData} barGap={4}>
+              <BarChart data={chartData} barGap={4}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                 <XAxis dataKey="day" tick={{ fontSize: 11, fontWeight: 700, fill: "#6f797c" }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 10, fill: "#bec8cb" }} axisLine={false} tickLine={false} tickFormatter={(v) => `₹${(v/1000).toFixed(0)}k`} />
@@ -167,7 +299,7 @@ export default function DashboardPage() {
               <Link href="/insights" className="text-xs font-bold text-primary-container hover:underline">See all</Link>
             </div>
             <div className="space-y-3">
-              {mockInsights.slice(0, 3).map((insight) => (
+                {insights.map((insight) => (
                 <div key={insight.id} className={`p-3 rounded-xl border ${insight.priority === "high" ? "bg-red-50 border-red-100" : "bg-amber-50 border-amber-100"}`}>
                   <p className="text-xs font-extrabold text-on-surface">{insight.productName}</p>
                   <p className="text-[11px] font-medium text-on-surface-variant mt-0.5">{insight.recommendation}</p>
@@ -180,6 +312,11 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+      {loading && (
+        <p className="text-sm font-medium text-on-surface-variant">
+          Loading your live dashboard data...
+        </p>
+      )}
     </div>
   );
 }
