@@ -223,9 +223,14 @@ export default function InventoryPage() {
                     </span>
                   </td>
                   <td className="px-4 py-4">
-                    <button className="p-1.5 text-on-surface-variant hover:text-primary-container hover:bg-surface-container rounded-lg transition-all">
+                    <Link
+                      href={`/edit-product/${encodeURIComponent(p.id)}`}
+                      className="p-1.5 text-on-surface-variant hover:text-primary-container hover:bg-surface-container rounded-lg transition-all inline-flex"
+                      aria-label={`Edit ${p.name}`}
+                      title="Edit"
+                    >
                       <span className="material-symbols-outlined text-[18px]">more_vert</span>
-                    </button>
+                    </Link>
                   </td>
                 </tr>
               ))}

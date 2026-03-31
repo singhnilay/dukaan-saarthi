@@ -10,6 +10,7 @@ export default function SettingsPage() {
   const [shopName, setShopName] = useState("Your Shop");
   const [ownerName, setOwnerName] = useState("Shop Owner");
   const [language, setLanguage] = useState("English");
+  const [monthlyGoal, setMonthlyGoal] = useState<number>(0);
   const [notifications, setNotifications] = useState({ expiry: true, lowStock: true, aiTips: true });
   const [saved, setSaved] = useState(false);
 
@@ -49,12 +50,26 @@ export default function SettingsPage() {
         setShopName(shop.name ?? "Your Shop");
         setLanguage(shop.language ?? "English");
 
+        // `monthly_goal` may not exist yet in DB. Try to load it, but don't fail.
+        try {
+          const { data: goalRow, error: goalErr } = await supabase
+            .from("shops")
+            .select("monthly_goal")
+            .eq("id", shop.id)
+            .maybeSingle();
+
+          if (!goalErr) setMonthlyGoal(Number((goalRow as any)?.monthly_goal ?? 0));
+        } catch {
+          // ignore
+        }
+
         const monthStart = new Date();
         monthStart.setDate(1);
         const month = monthStart.toISOString().slice(0, 10);
 
         const [{ data: categories }, { data: monthly }] = await Promise.all([
-          supabase.from("expense_categories").select("id, code, label, icon"),
+          // `expense_categories` might not have an `icon` column. Keep this query minimal.
+          supabase.from("expense_categories").select("id, code, label"),
           supabase
             .from("shop_monthly_expenses")
             .select("category_id, amount, month")
@@ -75,7 +90,7 @@ export default function SettingsPage() {
               id: c.code,
               label: c.label,
               amount: 0,
-              icon: c.icon ?? "payments",
+              icon: "payments",
             } as Expense);
 
           const amount = amountByCategoryId.get(c.id) ?? base.amount ?? 0;
@@ -109,6 +124,16 @@ export default function SettingsPage() {
         .from("shops")
         .update({ name: shopName, language })
         .eq("id", shop.id);
+
+      // Persist monthly goal if column exists.
+      try {
+        await supabase
+          .from("shops")
+          .update({ monthly_goal: monthlyGoal })
+          .eq("id", shop.id);
+      } catch {
+        // ignore
+      }
 
       const monthStart = new Date();
       monthStart.setDate(1);
@@ -175,6 +200,18 @@ export default function SettingsPage() {
               ))}
             </select>
           </div>
+        </div>
+        <div>
+          <label className="text-xs font-extrabold uppercase tracking-wider text-on-surface-variant block mb-2">
+            Monthly Goal (₹)
+          </label>
+          <input
+            type="number"
+            min="0"
+            value={monthlyGoal}
+            onChange={(e) => setMonthlyGoal(Number(e.target.value || 0))}
+            className="w-full bg-surface-container-low border-none rounded-xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-container/30 transition-all"
+          />
         </div>
         <div>
           <label className="text-xs font-extrabold uppercase tracking-wider text-on-surface-variant block mb-2">Owner Name</label>

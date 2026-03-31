@@ -50,6 +50,19 @@ export default function DashboardPage() {
 
         setShopName(shop.name ?? "Your Shop");
 
+        // Load monthly goal (if available).
+        let monthlyGoal = 0;
+        try {
+          const { data: goalRow, error: goalErr } = await supabase
+            .from("shops")
+            .select("monthly_goal")
+            .eq("id", shop.id)
+            .maybeSingle();
+          if (!goalErr) monthlyGoal = Number((goalRow as any)?.monthly_goal ?? 0);
+        } catch {
+          monthlyGoal = 0;
+        }
+
         const [{ data: productRows }, { data: insightsRows }, { data: metricsRows }] =
           await Promise.all([
             supabase
@@ -120,11 +133,49 @@ export default function DashboardPage() {
         const expiringCount = mappedProducts.filter((p) => (p.daysToExpiry ?? 999) <= 30).length;
         const topProduct = [...mappedProducts].sort((a, b) => b.quantity - a.quantity)[0]?.name ?? "N/A";
 
+        // Monthly progress based on total monthly revenue.
+        let monthlyRevenue = 0;
+        let monthlyProgress = 0;
+        try {
+          const monthStart = new Date();
+          monthStart.setDate(1);
+          monthStart.setHours(0, 0, 0, 0);
+
+          const nextMonth = new Date(monthStart);
+          nextMonth.setMonth(monthStart.getMonth() + 1);
+
+          const monthStartISO = monthStart.toISOString().slice(0, 10);
+          const nextMonthISO = nextMonth.toISOString().slice(0, 10);
+
+          const { data: monthRows, error: monthErr } = await supabase
+            .from("daily_shop_metrics")
+            .select("revenue")
+            .eq("shop_id", shop.id)
+            .gte("day", monthStartISO)
+            .lt("day", nextMonthISO);
+
+          if (!monthErr) {
+            monthlyRevenue = (monthRows ?? []).reduce(
+              (sum: number, r: any) => sum + Number(r.revenue ?? 0),
+              0
+            );
+          }
+
+          if (monthlyGoal > 0) {
+            monthlyProgress = Math.max(
+              0,
+              Math.min(100, Math.round((monthlyRevenue / monthlyGoal) * 100))
+            );
+          }
+        } catch {
+          monthlyProgress = 0;
+        }
+
         setStats({
           todayProfit: Number(todayMetric?.net_profit ?? todayMetric?.gross_profit ?? 0),
           todayRevenue: Number(todayMetric?.revenue ?? 0),
-          monthlyGoal: 0,
-          monthlyProgress: 0,
+          monthlyGoal,
+          monthlyProgress,
           totalProducts: mappedProducts.length,
           lowStockCount,
           expiringCount,
