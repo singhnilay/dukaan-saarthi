@@ -22,8 +22,9 @@ export default function TopBar() {
 
   useEffect(() => {
     const loadProfile = async () => {
-      try {
-        const supabase = createClient();
+      const supabase = createClient();
+
+      const load = async () => {
         const { data: userData } = await supabase.auth.getUser();
         const user = userData.user;
         if (!user) return;
@@ -53,8 +54,23 @@ export default function TopBar() {
                 .map((p: string) => p[0]?.toUpperCase() ?? "")
                 .join("") || "SO";
         setInitials(inits);
-      } catch (e) {
-        console.error("Failed to load owner profile for TopBar:", e);
+      };
+
+      try {
+        await load();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("lock")) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          try {
+            await load();
+            return;
+          } catch (retryError) {
+            console.error("Failed to load owner profile for TopBar after retry:", retryError);
+            return;
+          }
+        }
+        console.error("Failed to load owner profile for TopBar:", error);
       }
     };
 

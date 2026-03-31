@@ -63,6 +63,12 @@ export default function DashboardPage() {
           monthlyGoal = 0;
         }
 
+        const today = new Date();
+        const todayIso = today.toLocaleDateString("en-CA");
+        const weekStart = new Date(today);
+        weekStart.setDate(today.getDate() - 6);
+        const weekStartIso = weekStart.toLocaleDateString("en-CA");
+
         const [{ data: productRows }, { data: insightsRows }, { data: metricsRows }] =
           await Promise.all([
             supabase
@@ -79,6 +85,7 @@ export default function DashboardPage() {
               .from("daily_shop_metrics")
               .select("day, revenue, gross_profit, net_profit")
               .eq("shop_id", shop.id)
+              .gte("day", weekStartIso)
               .order("day", { ascending: false })
               .limit(7),
           ]);
@@ -120,7 +127,7 @@ export default function DashboardPage() {
         });
         setInsights(mappedInsights);
 
-        const sortedMetrics = [...(metricsRows ?? [])].sort((a, b) => (a.day > b.day ? 1 : -1));
+        const sortedMetrics = [...(metricsRows ?? [])].sort((a, b) => a.day.localeCompare(b.day));
         const mappedChart: ChartDataPoint[] = sortedMetrics.map((m) => ({
           day: new Date(m.day).toLocaleDateString("en-IN", { weekday: "short" }),
           revenue: Number(m.revenue ?? 0),
@@ -128,7 +135,7 @@ export default function DashboardPage() {
         }));
         setChartData(mappedChart);
 
-        const todayMetric = sortedMetrics.at(-1);
+        const todayMetric = sortedMetrics.find((metric) => metric.day === todayIso);
         const lowStockCount = mappedProducts.filter((p) => p.quantity <= p.minQuantity).length;
         const expiringCount = mappedProducts.filter((p) => (p.daysToExpiry ?? 999) <= 30).length;
         const topProduct = [...mappedProducts].sort((a, b) => b.quantity - a.quantity)[0]?.name ?? "N/A";
