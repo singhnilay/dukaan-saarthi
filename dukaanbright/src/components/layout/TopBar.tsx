@@ -1,8 +1,9 @@
 "use client";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import SearchBar from "./SearchBar";
 
 const pageMeta: Record<string, { title: string; subtitle: string }> = {
   "/dashboard":   { title: "Dashboard",    subtitle: "Overview of your shop today" },
@@ -10,81 +11,35 @@ const pageMeta: Record<string, { title: string; subtitle: string }> = {
   "/add-sale":    { title: "Add Sale",     subtitle: "Record sales and update revenue" },
   "/insights":    { title: "AI Insights",  subtitle: "Smart recommendations to boost profit" },
   "/add-product": { title: "Add Product",  subtitle: "Add new items to your inventory" },
-  "/finances":    { title: "Finances",    subtitle: "Bills, sales ledger & cash flow" },
+  "/finances":    { title: "Finances",     subtitle: "Bills, sales ledger & cash flow" },
   "/settings":    { title: "Settings",     subtitle: "Configure your shop preferences" },
+  "/edit-product":{ title: "Edit Product", subtitle: "Update product details" },
 };
 
 export default function TopBar() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const router = useRouter();
   const meta = pageMeta[pathname] ?? { title: "Dukaan Bright", subtitle: "" };
-  const [focused, setFocused] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
   const [ownerName, setOwnerName] = useState("Shop Owner");
-  const [initials, setInitials] = useState("SO");
+  const [initials, setInitials]   = useState("SO");
 
   useEffect(() => {
-    if (pathname === "/inventory") {
-      setSearchQuery(searchParams.get("search") ?? "");
-    } else {
-      setSearchQuery("");
-    }
-
-    const loadProfile = async () => {
-      const supabase = createClient();
-
-      const load = async () => {
-        const { data: userData } = await supabase.auth.getUser();
-        const user = userData.user;
+    const load = async () => {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
-
         const { data: profile } = await supabase
-          .from("users")
-          .select("full_name")
-          .eq("id", user.id)
-          .maybeSingle();
-
+          .from("users").select("full_name").eq("id", user.id).maybeSingle();
         const name =
           profile?.full_name ||
           (user.user_metadata?.full_name as string | undefined) ||
-          user.email ||
-          "Shop Owner";
-
+          user.email || "Shop Owner";
         setOwnerName(name);
-
-        const parts = name
-          .split(" ")
-          .filter((part: string) => Boolean(part))
-          .slice(0, 2);
-        const inits =
-          parts.length === 0
-            ? "SO"
-            : parts
-                .map((p: string) => p[0]?.toUpperCase() ?? "")
-                .join("") || "SO";
-        setInitials(inits);
-      };
-
-      try {
-        await load();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.includes("lock")) {
-          await new Promise((resolve) => setTimeout(resolve, 150));
-          try {
-            await load();
-            return;
-          } catch (retryError) {
-            console.error("Failed to load owner profile for TopBar after retry:", retryError);
-            return;
-          }
-        }
-        console.error("Failed to load owner profile for TopBar:", error);
-      }
+        const parts = name.split(" ").filter(Boolean).slice(0, 2);
+        setInitials(parts.map((p: string) => p[0]?.toUpperCase() ?? "").join("") || "SO");
+      } catch { /* ignore */ }
     };
-
-    void loadProfile();
+    void load();
   }, []);
 
   return (
@@ -94,32 +49,10 @@ export default function TopBar() {
           <h1 className="text-lg font-extrabold text-on-surface tracking-tight leading-tight">{meta.title}</h1>
           <p className="text-[11px] font-medium text-on-surface-variant leading-tight">{meta.subtitle}</p>
         </div>
-        <div className={`hidden md:flex items-center px-4 py-2 rounded-full w-72 transition-all duration-200 ${
-          focused
-            ? "bg-white ring-2 ring-primary-container/30 shadow-card"
-            : "bg-surface-container-low"
-        }`}>
-          <span className="material-symbols-outlined text-slate-400 text-[18px] mr-2 flex-shrink-0">search</span>
-          <input
-            className="bg-transparent border-none outline-none text-sm w-full font-medium placeholder:text-slate-400"
-            placeholder="Search products..."
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                const query = searchQuery.trim();
-                if (query) {
-                  router.push(`/inventory?search=${encodeURIComponent(query)}`);
-                } else if (pathname === "/inventory") {
-                  router.push("/inventory");
-                }
-              }
-            }}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-          />
-        </div>
+        {/* SearchBar isolated in its own Suspense so useSearchParams doesn't block prerender */}
+        <Suspense fallback={<div className="hidden md:block w-72 h-9 bg-surface-container-low rounded-full animate-pulse" />}>
+          <SearchBar />
+        </Suspense>
       </div>
 
       <div className="flex items-center gap-1">
@@ -130,10 +63,7 @@ export default function TopBar() {
         <button className="p-2 text-slate-500 hover:bg-surface-container-low rounded-full transition-all active:scale-95">
           <span className="material-symbols-outlined text-[22px]">help_outline</span>
         </button>
-        <Link
-          href="/settings"
-          className="flex items-center gap-2.5 pl-3 ml-1 border-l border-gray-100 hover:opacity-80 transition-opacity"
-        >
+        <Link href="/settings" className="flex items-center gap-2.5 pl-3 ml-1 border-l border-gray-100 hover:opacity-80 transition-opacity">
           <div className="text-right hidden sm:block">
             <p className="text-xs font-extrabold text-on-surface tracking-tight">{ownerName}</p>
             <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Shop Owner</p>
