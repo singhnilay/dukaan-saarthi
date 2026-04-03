@@ -4,6 +4,7 @@ export type AlertLevel = "red" | "yellow" | "green";
 export interface Product {
   id: string;
   name: string;
+  barcode?: string;
   category: string;
   quantity: number;
   minQuantity: number;

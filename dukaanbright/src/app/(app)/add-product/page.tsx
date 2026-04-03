@@ -1,7 +1,11 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { resolveUserShop } from "@/lib/supabase/shopResolver";
+import { lookupProductAggregated, type ScannedProduct } from "@/lib/openFoodFacts";
+import { useBarcodeScanner, type ScanStatus } from "@/lib/scanner";
+import { isSafeModeEnabled } from "@/lib/utils";
 
 const categories = [
   "Grains & Flour", "Dairy", "Instant Food", "Beverages",
@@ -10,26 +14,100 @@ const categories = [
 
 export default function AddProductPage() {
   const router = useRouter();
+  const [safeMode, setSafeMode] = useState(false);
   const [form, setForm] = useState({
     name: "", category: "", quantity: "", minQuantity: "",
     costPrice: "", sellingPrice: "", expiryDate: "", barcode: "",
   });
   const [saved, setSaved] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [isLookingUp, setIsLookingUp] = useState(false);
+  const [lookupStatus, setLookupStatus] = useState<ScanStatus | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  useEffect(() => {
+    setSafeMode(isSafeModeEnabled());
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
+  const applyProductToForm = useCallback((barcode: string, product: ScannedProduct | null) => {
+    setForm((prev) => ({
+      ...prev,
+      barcode,
+      name: prev.name || product?.name || prev.name,
+      category: prev.category || product?.category || prev.category,
+      costPrice:
+        prev.costPrice ||
+        (product?.price ? Number((product.price * 0.85).toFixed(2)).toString() : prev.costPrice),
+      sellingPrice: prev.sellingPrice || (product?.price ? product.price.toString() : prev.sellingPrice),
+    }));
+  }, []);
+
+  const handleLookup = useCallback(async (rawBarcode: string) => {
+    const barcode = rawBarcode.replace(/\D/g, "");
+    if (!barcode) {
+      setLookupStatus({ type: "error", message: "Enter a valid barcode first." });
+      return;
+    }
+
+    setIsLookingUp(true);
+    setLookupStatus({ type: "info", message: `Looking up ${barcode}...` });
+
+    try {
+      const aggregated = await lookupProductAggregated(barcode);
+      const product = aggregated.resolved;
+
+      applyProductToForm(barcode, product);
+
+      if (!product) {
+        setLookupStatus({ type: "error", message: "No product found for this barcode." });
+        return;
+      }
+
+      const sourceLabel = aggregated.sources.openFoodFacts && aggregated.sources.serpapi
+        ? "OpenFoodFacts + SerpApi"
+        : product.source === "openfoodfacts"
+        ? "OpenFoodFacts"
+        : "SerpApi";
+
+      setLookupStatus({ type: "success", message: `Found ${product.name} (${sourceLabel}). Pre-filled fields.` });
+    } catch (error) {
+      console.error("Barcode lookup failed:", error);
+      setLookupStatus({ type: "error", message: "Lookup failed. Try again." });
+    } finally {
+      setIsLookingUp(false);
+    }
+  }, [applyProductToForm]);
+
+  const onScanResult = useCallback(async (rawBarcode: string) => {
+    const barcode = rawBarcode.replace(/\D/g, "");
+    setForm((prev) => ({ ...prev, barcode }));
+    await handleLookup(barcode);
+  }, [handleLookup]);
+
+  const {
+    videoRef,
+    status: scannerStatus,
+    cameraDevices,
+    isCameraActive,
+    isTorchSupported,
+    isTorchOn,
+    toggleTorch,
+    switchCamera,
+    scanCurrentFrame,
+  } = useBarcodeScanner({ isActive: scanning && !safeMode, onResult: onScanResult });
+
   const handleScan = () => {
-    setScanning(true);
-    setTimeout(() => {
-      setForm((f) => ({ ...f, barcode: "8901030826409", name: "Parle-G Biscuits 200g", category: "Snacks", costPrice: "22", sellingPrice: "30" }));
-      setScanning(false);
-    }, 1500);
+    if (safeMode) return;
+    setLookupStatus(null);
+    setScanning((prev) => !prev);
   };
+
+  const handleManualLookup = () => void handleLookup(form.barcode);
 
   const getStockStatus = (quantity: number, minQuantity: number) => {
     if (quantity <= Math.max(1, Math.floor(minQuantity / 2))) return "critical";
@@ -51,16 +129,13 @@ export default function AddProductPage() {
         return;
       }
 
-      const { data: shop } = await supabase
-        .from("shops")
-        .select("id")
-        .eq("owner_user_id", user.id)
-        .order("created_at", { ascending: true })
-        .maybeSingle();
+      const shop = (await resolveUserShop(supabase, user.id, "id")) as { id: string } | null;
       if (!shop) {
         setErrorMsg("Shop setup not found. Please complete onboarding first.");
         return;
       }
+
+      const shopId = String(shop.id);
 
       // Find/create product category for this shop.
       let categoryId: string | null = null;
@@ -68,7 +143,7 @@ export default function AddProductPage() {
         const { data: existingCategory } = await supabase
           .from("product_categories")
           .select("id")
-          .eq("shop_id", shop.id)
+          .eq("shop_id", shopId)
           .eq("name", form.category)
           .maybeSingle();
 
@@ -77,7 +152,7 @@ export default function AddProductPage() {
         } else {
           const { data: createdCategory, error: categoryError } = await supabase
             .from("product_categories")
-            .insert({ shop_id: shop.id, name: form.category })
+            .insert({ shop_id: shopId, name: form.category })
             .select("id")
             .single();
           if (categoryError) throw categoryError;
@@ -90,7 +165,7 @@ export default function AddProductPage() {
       const stockStatus = getStockStatus(quantity, minQuantity);
 
       const { error } = await supabase.from("products").insert({
-        shop_id: shop.id,
+        shop_id: shopId,
         name: form.name,
         category_id: categoryId,
         barcode: form.barcode || null,
@@ -127,23 +202,110 @@ export default function AddProductPage() {
       </div>
 
       {/* Barcode scan strip */}
-      <div className="bg-surface-container-lowest rounded-xl p-5 shadow-card flex items-center gap-4">
-        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${scanning ? "bg-primary-container/20 animate-pulse" : "bg-surface-container-low"}`}>
-          <span className="material-symbols-outlined text-primary-container text-[24px]">qr_code_scanner</span>
+      <div className="bg-surface-container-lowest rounded-xl p-5 shadow-card space-y-4">
+        <div className="flex items-center gap-4">
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${scanning ? "bg-primary-container/20 animate-pulse" : "bg-surface-container-low"}`}>
+            <span className="material-symbols-outlined text-primary-container text-[24px]">qr_code_scanner</span>
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-bold text-on-surface">Scan Barcode</p>
+            <p className="text-xs text-on-surface-variant font-medium">Auto-fill product details from barcode</p>
+            {safeMode && (
+              <p className="text-[11px] font-bold text-amber-700 mt-1">Safe mode on: camera access is paused.</p>
+            )}
+            {form.barcode && <p className="text-xs font-extrabold text-emerald-600 mt-0.5">Last scanned: {form.barcode}</p>}
+            {lookupStatus && (
+              <p
+                className={`mt-1 text-xs font-bold ${
+                  lookupStatus.type === "success"
+                    ? "text-emerald-600"
+                    : lookupStatus.type === "error"
+                    ? "text-red-600"
+                    : "text-on-surface-variant"
+                }`}
+              >
+                {lookupStatus.message}
+              </p>
+            )}
+            {scannerStatus && (
+              <p className="text-[11px] text-on-surface-variant font-medium mt-1">{scannerStatus.message}</p>
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={handleScan}
+              disabled={safeMode}
+              className="px-5 py-2.5 cta-gradient text-white rounded-xl font-bold text-sm shadow-card hover:opacity-90 active:scale-95 transition-all disabled:opacity-60"
+            >
+              {safeMode ? "Disabled" : scanning ? "Stop Scan" : "Scan Now"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void scanCurrentFrame()}
+              disabled={!isCameraActive || isLookingUp || safeMode}
+              className="px-5 py-2.5 rounded-xl font-bold text-sm border border-outline/20 text-on-surface hover:bg-surface-container disabled:opacity-60"
+            >
+              Scan Current Frame
+            </button>
+          </div>
         </div>
-        <div className="flex-1">
-          <p className="text-sm font-bold text-on-surface">Scan Barcode</p>
-          <p className="text-xs text-on-surface-variant font-medium">Auto-fill product details from barcode</p>
-          {form.barcode && <p className="text-xs font-extrabold text-emerald-600 mt-0.5">✓ Scanned: {form.barcode}</p>}
+
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <div className="flex flex-1 items-center gap-2">
+            <input
+              name="barcode"
+              inputMode="numeric"
+              value={form.barcode}
+              onChange={handleChange}
+              placeholder="Enter barcode digits"
+              className="flex-1 bg-surface-container-low border-none rounded-xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-primary-container/30 placeholder:text-slate-400 transition-all"
+            />
+            <button
+              type="button"
+              onClick={handleManualLookup}
+              disabled={isLookingUp}
+              className="px-5 py-3 md-button-primary disabled:opacity-60"
+            >
+              {isLookingUp ? "Looking..." : "Lookup"}
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={switchCamera}
+              disabled={!scanning || cameraDevices.length < 2 || safeMode}
+              className="px-4 py-2 rounded-xl font-bold text-sm bg-surface-container text-on-surface hover:bg-surface-container-high disabled:opacity-60"
+            >
+              Switch Camera
+            </button>
+            <button
+              type="button"
+              onClick={toggleTorch}
+              disabled={!scanning || !isTorchSupported || safeMode}
+              className={`px-4 py-2 rounded-xl font-bold text-sm border border-outline/20 ${
+                isTorchOn ? "bg-primary text-white" : "bg-surface-container text-on-surface"
+              } disabled:opacity-60`}
+            >
+              {isTorchOn ? "Torch On" : "Torch"}
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={handleScan}
-          disabled={scanning}
-          className="px-5 py-2.5 cta-gradient text-white rounded-xl font-bold text-sm shadow-card hover:opacity-90 active:scale-95 transition-all disabled:opacity-60"
-        >
-          {scanning ? "Scanning…" : "Scan Now"}
-        </button>
+
+        {scanning && !safeMode && (
+          <div className="grid gap-4 md:grid-cols-[1fr_260px] items-center">
+            <div className="relative h-64 w-full overflow-hidden rounded-2xl border-2 border-primary bg-black/40">
+              <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted />
+              <div className="absolute inset-4 rounded-xl border border-primary/70" />
+              <div className="absolute left-0 right-0 top-1/2 h-0.5 bg-primary/80" />
+            </div>
+            <div className="space-y-1 text-xs text-on-surface-variant font-medium">
+              <p>1) Use the rear camera for best focus.</p>
+              <p>2) Fill most of the frame with the barcode lines.</p>
+              <p>3) If auto scan is slow, tap Scan Current Frame.</p>
+            </div>
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="bg-surface-container-lowest rounded-xl p-7 shadow-card space-y-6">

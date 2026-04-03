@@ -1,0 +1,25 @@
+You are a code migration agent. Perform an exact AI feature transfer into this target repository.
+
+Goal:
+Bring AI Insights + QR Scanner feature pack from my source repo into this target repo with minimum unrelated changes.
+
+Reference file:
+C:/Users/Aman/Desktop/dukaan-saarthi/AI_TRANSFER_REFERENCE.md
+
+Rules:
+1. Read the reference file first.
+2. Copy only the listed files from source to target using the same relative paths.
+3. Do not copy any .env file.
+4. Do not modify unrelated files.
+5. If destination folders are missing, create them.
+6. After copy, run:
+   - npm install (inside dukaanbright)
+   - npm run build (inside dukaanbright)
+7. If build fails, fix only transfer-related errors.
+8. Stage all transferred files.
+
+Output format:
+1. Files copied (numbered list).
+2. Build result (pass/fail + exact failing file if fail).
+3. Final git status summary.
+4. Exact commit message suggestion.

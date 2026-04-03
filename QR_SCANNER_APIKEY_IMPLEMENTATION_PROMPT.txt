@@ -1,0 +1,74 @@
+You are a Next.js feature implementation agent. Implement a production-ready QR/Barcode scanner flow with secure API key handling.
+
+Goal:
+Build barcode scanning for product autofill with OpenFoodFacts first, then SerpApi fallback, without exposing private API keys in client code.
+
+Project context:
+- App uses Next.js App Router and TypeScript.
+- Scanner UI should work in Add Product screen.
+- API routes should proxy third-party requests.
+
+Requirements:
+1. Scanner feature
+- Add a reusable scanner module for camera-based barcode detection.
+- Support common barcode formats (EAN-13, EAN-8, UPC, Code128).
+- Add start/stop scan, switch camera, torch toggle, and manual frame scan button.
+- Add scanner status messages for success, error, and guidance.
+
+2. Product lookup pipeline
+- On barcode capture, call server-side route for OpenFoodFacts first.
+- If product is missing or weak, call server-side SerpApi route as fallback.
+- Merge results into one normalized product object:
+  - barcode
+  - name
+  - category
+  - brand
+  - imageUrl
+  - price
+  - currency
+  - source
+
+3. Secure API key handling
+- Never call SerpApi directly from client with key.
+- Create server route that reads keys from environment variables only.
+- Use this key precedence:
+  - SERPAPI_API_KEY
+  - NEXT_PUBLIC_SERPAPI_KEY only as last resort for local dev compatibility
+- Return safe error JSON when key is missing.
+- Do not log secrets.
+
+4. Environment setup
+- Add or update env documentation with required keys:
+  - NEXT_PUBLIC_SUPABASE_URL
+  - NEXT_PUBLIC_SUPABASE_ANON_KEY or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY
+  - SERPAPI_API_KEY
+- Ensure .env files remain gitignored.
+- Add .env.example entries without real values.
+
+5. UI integration
+- Integrate scanner into Add Product page.
+- On successful lookup, prefill product name/category/barcode and optional price hints.
+- Keep manual barcode input and lookup fallback.
+- Show clear user messages when camera permission is denied or HTTPS is required.
+
+6. Error handling and safety
+- Handle network failures, no barcode found, invalid barcode, and upstream API errors.
+- Add graceful fallback behavior when one source fails.
+- Keep feature behind safe checks so app does not crash on unsupported devices.
+
+7. Validation
+- Run npm install if needed.
+- Run npm run build.
+- If build fails, fix only scanner/API-key-related issues.
+
+8. Output format
+Return in this exact structure:
+1. Files created/updated (numbered list)
+2. API key flow summary (client vs server responsibilities)
+3. Build result (pass/fail)
+4. Follow-up steps for developer (set env vars, run app)
+
+Constraints:
+- Keep changes minimal and focused.
+- Do not refactor unrelated modules.
+- Do not remove existing working features.
