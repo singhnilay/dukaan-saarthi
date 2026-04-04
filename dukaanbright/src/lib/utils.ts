@@ -63,21 +63,3 @@ export function daysUntil(dateStr: string): number {
   const diff = target.getTime() - now.getTime();
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
-
-// Safe mode avoids heavy client work (charts, camera, large fetches).
-// It can be toggled via NEXT_PUBLIC_SAFE_MODE=1, ?safe=1, or localStorage flag.
-export function isSafeModeEnabled(): boolean {
-  const envSafe = process.env.NEXT_PUBLIC_SAFE_MODE === "1";
-  if (typeof window === "undefined") return envSafe;
-
-  const params = new URLSearchParams(window.location.search);
-  const querySafe = params.get("safe") === "1";
-  const stored = window.localStorage?.getItem("safeMode") === "1";
-
-  return envSafe || querySafe || stored;
-}
-
-export function setSafeModeEnabled(enabled: boolean) {
-  if (typeof window === "undefined") return;
-  window.localStorage?.setItem("safeMode", enabled ? "1" : "0");
-}

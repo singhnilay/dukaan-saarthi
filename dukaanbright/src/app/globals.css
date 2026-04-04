@@ -119,6 +119,31 @@ h1, h2, h3, h4, h5, h6 {
 .animate-delay-300   { animation-delay: 0.3s; opacity: 0; }
 .animate-delay-400   { animation-delay: 0.4s; opacity: 0; }
 
+@keyframes scannerSweep {
+  0% { transform: translateY(16px); opacity: 0.7; }
+  50% { opacity: 1; }
+  100% { transform: translateY(220px); opacity: 0.7; }
+}
+
+@keyframes scannerTargetPulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 103, 120, 0.2); }
+  50% { box-shadow: 0 0 0 8px rgba(0, 103, 120, 0.06); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 103, 120, 0); }
+}
+
+.scanner-shell {
+  contain: layout paint;
+}
+
+.scanner-target {
+  animation: scannerTargetPulse 1.6s ease-in-out infinite;
+}
+
+.scanner-sweep-line {
+  animation: scannerSweep 1.2s linear infinite;
+  box-shadow: 0 0 8px rgba(0, 103, 120, 0.8);
+}
+
 input[type="range"] {
   -webkit-appearance: none;
   width: 100%;

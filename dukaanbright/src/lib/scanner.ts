@@ -7,6 +7,13 @@ import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 export type ScanStatus = { type: "success" | "error" | "info"; message: string };
 
 const isLikelyBarcode = (value: string) => /^\d{8,14}$/.test(value.replace(/\D/g, ""));
+const SUPPORTED_FORMATS = [
+  BarcodeFormat.EAN_13,
+  BarcodeFormat.EAN_8,
+  BarcodeFormat.UPC_A,
+  BarcodeFormat.UPC_E,
+  BarcodeFormat.CODE_128,
+];
 
 export function useBarcodeScanner(options: { isActive: boolean; onResult: (barcode: string) => Promise<void> | void }) {
   const { isActive, onResult } = options;
@@ -17,6 +24,7 @@ export function useBarcodeScanner(options: { isActive: boolean; onResult: (barco
   const activeTrackRef = useRef<MediaStreamTrack | null>(null);
   const lookupInProgressRef = useRef(false);
   const lastDetectedRef = useRef<{ code: string; ts: number }>({ code: "", ts: 0 });
+  const lastInfoMessageTsRef = useRef(0);
 
   const [status, setStatus] = useState<ScanStatus | null>(null);
   const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
@@ -102,25 +110,12 @@ export function useBarcodeScanner(options: { isActive: boolean; onResult: (barco
 
       if (!readerRef.current) {
         const hints = new Map();
-        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-          BarcodeFormat.EAN_13,
-          BarcodeFormat.EAN_8,
-          BarcodeFormat.UPC_A,
-          BarcodeFormat.UPC_E,
-          BarcodeFormat.CODE_128,
-          BarcodeFormat.CODE_39,
-          BarcodeFormat.CODE_93,
-          BarcodeFormat.ITF,
-          BarcodeFormat.CODABAR,
-          BarcodeFormat.RSS_14,
-          BarcodeFormat.RSS_EXPANDED,
-          BarcodeFormat.QR_CODE,
-        ]);
-        hints.set(DecodeHintType.TRY_HARDER, true);
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, SUPPORTED_FORMATS);
+        hints.set(DecodeHintType.TRY_HARDER, false);
 
         readerRef.current = new BrowserMultiFormatReader(hints, {
-          delayBetweenScanAttempts: 30,
-          delayBetweenScanSuccess: 900,
+          delayBetweenScanAttempts: 12,
+          delayBetweenScanSuccess: 250,
         });
       }
 
@@ -143,12 +138,16 @@ export function useBarcodeScanner(options: { isActive: boolean; onResult: (barco
         const detected = String(result.getText?.() || "").trim();
         if (!detected) return;
         if (!isLikelyBarcode(detected)) {
-          setStatus({ type: "info", message: "Non-barcode value detected. Scan EAN/UPC codes." });
+          const now = Date.now();
+          if (now - lastInfoMessageTsRef.current > 2500) {
+            setStatus({ type: "info", message: "Align EAN/UPC barcode inside the frame." });
+            lastInfoMessageTsRef.current = now;
+          }
           return;
         }
 
         const now = Date.now();
-        if (lastDetectedRef.current.code === detected && now - lastDetectedRef.current.ts < 3500) return;
+        if (lastDetectedRef.current.code === detected && now - lastDetectedRef.current.ts < 1500) return;
 
         lastDetectedRef.current = { code: detected, ts: now };
         lookupInProgressRef.current = true;
@@ -168,9 +167,9 @@ export function useBarcodeScanner(options: { isActive: boolean; onResult: (barco
           {
             video: {
               ...(nextCameraId ? { deviceId: { exact: nextCameraId } } : { facingMode: { ideal: "environment" } }),
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
-              frameRate: { ideal: 30, min: 15 },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 24, min: 10 },
             },
             audio: false,
           },

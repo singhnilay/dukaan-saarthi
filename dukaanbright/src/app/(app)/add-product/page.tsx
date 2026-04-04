@@ -1,11 +1,10 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { resolveUserShop } from "@/lib/supabase/shopResolver";
 import { lookupProductAggregated, type ScannedProduct } from "@/lib/openFoodFacts";
 import { useBarcodeScanner, type ScanStatus } from "@/lib/scanner";
-import { isSafeModeEnabled } from "@/lib/utils";
 
 const categories = [
   "Grains & Flour", "Dairy", "Instant Food", "Beverages",
@@ -14,7 +13,6 @@ const categories = [
 
 export default function AddProductPage() {
   const router = useRouter();
-  const [safeMode, setSafeMode] = useState(false);
   const [form, setForm] = useState({
     name: "", category: "", quantity: "", minQuantity: "",
     costPrice: "", sellingPrice: "", expiryDate: "", barcode: "",
@@ -25,10 +23,6 @@ export default function AddProductPage() {
   const [lookupStatus, setLookupStatus] = useState<ScanStatus | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-
-  useEffect(() => {
-    setSafeMode(isSafeModeEnabled());
-  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -99,10 +93,9 @@ export default function AddProductPage() {
     toggleTorch,
     switchCamera,
     scanCurrentFrame,
-  } = useBarcodeScanner({ isActive: scanning && !safeMode, onResult: onScanResult });
+  } = useBarcodeScanner({ isActive: scanning, onResult: onScanResult });
 
   const handleScan = () => {
-    if (safeMode) return;
     setLookupStatus(null);
     setScanning((prev) => !prev);
   };
@@ -163,12 +156,13 @@ export default function AddProductPage() {
       const quantity = Number(form.quantity || 0);
       const minQuantity = Number(form.minQuantity || 0);
       const stockStatus = getStockStatus(quantity, minQuantity);
+      const normalizedBarcode = form.barcode.replace(/\D/g, "");
 
       const { error } = await supabase.from("products").insert({
         shop_id: shopId,
         name: form.name,
         category_id: categoryId,
-        barcode: form.barcode || null,
+        barcode: normalizedBarcode || null,
         quantity,
         min_quantity: minQuantity,
         cost_price: Number(form.costPrice || 0),
@@ -210,9 +204,6 @@ export default function AddProductPage() {
           <div className="flex-1">
             <p className="text-sm font-bold text-on-surface">Scan Barcode</p>
             <p className="text-xs text-on-surface-variant font-medium">Auto-fill product details from barcode</p>
-            {safeMode && (
-              <p className="text-[11px] font-bold text-amber-700 mt-1">Safe mode on: camera access is paused.</p>
-            )}
             {form.barcode && <p className="text-xs font-extrabold text-emerald-600 mt-0.5">Last scanned: {form.barcode}</p>}
             {lookupStatus && (
               <p
@@ -235,15 +226,14 @@ export default function AddProductPage() {
             <button
               type="button"
               onClick={handleScan}
-              disabled={safeMode}
               className="px-5 py-2.5 cta-gradient text-white rounded-xl font-bold text-sm shadow-card hover:opacity-90 active:scale-95 transition-all disabled:opacity-60"
             >
-              {safeMode ? "Disabled" : scanning ? "Stop Scan" : "Scan Now"}
+              {scanning ? "Stop Scan" : "Scan Now"}
             </button>
             <button
               type="button"
               onClick={() => void scanCurrentFrame()}
-              disabled={!isCameraActive || isLookingUp || safeMode}
+              disabled={!isCameraActive || isLookingUp}
               className="px-5 py-2.5 rounded-xl font-bold text-sm border border-outline/20 text-on-surface hover:bg-surface-container disabled:opacity-60"
             >
               Scan Current Frame
@@ -274,7 +264,7 @@ export default function AddProductPage() {
             <button
               type="button"
               onClick={switchCamera}
-              disabled={!scanning || cameraDevices.length < 2 || safeMode}
+              disabled={!scanning || cameraDevices.length < 2}
               className="px-4 py-2 rounded-xl font-bold text-sm bg-surface-container text-on-surface hover:bg-surface-container-high disabled:opacity-60"
             >
               Switch Camera
@@ -282,7 +272,7 @@ export default function AddProductPage() {
             <button
               type="button"
               onClick={toggleTorch}
-              disabled={!scanning || !isTorchSupported || safeMode}
+              disabled={!scanning || !isTorchSupported}
               className={`px-4 py-2 rounded-xl font-bold text-sm border border-outline/20 ${
                 isTorchOn ? "bg-primary text-white" : "bg-surface-container text-on-surface"
               } disabled:opacity-60`}
@@ -292,14 +282,19 @@ export default function AddProductPage() {
           </div>
         </div>
 
-        {scanning && !safeMode && (
+        {scanning && (
           <div className="grid gap-4 md:grid-cols-[1fr_260px] items-center">
-            <div className="relative h-64 w-full overflow-hidden rounded-2xl border-2 border-primary bg-black/40">
-              <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted />
-              <div className="absolute inset-4 rounded-xl border border-primary/70" />
-              <div className="absolute left-0 right-0 top-1/2 h-0.5 bg-primary/80" />
+            <div className="relative h-64 w-full overflow-hidden rounded-2xl border-2 border-primary bg-black/40 scanner-shell">
+              <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted autoPlay />
+              <div className="absolute inset-4 rounded-xl border border-primary/70 scanner-target" />
+              <div className="absolute left-4 right-4 h-0.5 bg-primary/90 scanner-sweep-line" />
+              <div className="absolute left-6 top-6 h-6 w-6 border-l-2 border-t-2 border-primary/90" />
+              <div className="absolute right-6 top-6 h-6 w-6 border-r-2 border-t-2 border-primary/90" />
+              <div className="absolute bottom-6 left-6 h-6 w-6 border-b-2 border-l-2 border-primary/90" />
+              <div className="absolute bottom-6 right-6 h-6 w-6 border-b-2 border-r-2 border-primary/90" />
             </div>
             <div className="space-y-1 text-xs text-on-surface-variant font-medium">
+              <p className="text-primary-container font-bold">Scanner active</p>
               <p>1) Use the rear camera for best focus.</p>
               <p>2) Fill most of the frame with the barcode lines.</p>
               <p>3) If auto scan is slow, tap Scan Current Frame.</p>

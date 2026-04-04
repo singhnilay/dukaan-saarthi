@@ -1,18 +1,33 @@
 import { NextRequest } from "next/server";
 
-const OFF_BASE = "https://world.openfoodfacts.org/api/v2/product/";
-
 export async function GET(req: NextRequest) {
+  const openFoodFactsBase = process.env.OPENFOODFACTS_API_BASE_URL;
+  const openFoodFactsUserAgent = process.env.OPENFOODFACTS_USER_AGENT;
+
+  if (!openFoodFactsBase) {
+    return new Response(JSON.stringify({ status: 0, error: "OpenFoodFacts base URL missing" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  if (!openFoodFactsUserAgent) {
+    return new Response(JSON.stringify({ status: 0, error: "OpenFoodFacts user agent missing" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   const barcode = req.nextUrl.searchParams.get("barcode");
   if (!barcode) {
     return new Response("barcode required", { status: 400 });
   }
 
-  const url = `${OFF_BASE}${encodeURIComponent(barcode)}.json`;
+  const url = `${openFoodFactsBase}${encodeURIComponent(barcode)}.json`;
 
   try {
     const upstream = await fetch(url, {
-      headers: { "User-Agent": "dukaanbright/1.0 (+github.com/dukaanbright)" },
+      headers: { "User-Agent": openFoodFactsUserAgent },
       cache: "no-store",
     });
 

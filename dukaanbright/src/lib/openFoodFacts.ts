@@ -176,32 +176,18 @@ export async function lookupProductByBarcode(barcode: string): Promise<ScannedPr
 }
 
 export async function lookupProductAggregated(barcode: string): Promise<AggregatedProductResult> {
-  const [openFoodFacts, serpapi] = await Promise.all([
-    lookupProductByBarcode(barcode).catch(() => null),
-    lookupProductViaSerpApi(barcode).catch(() => null),
-  ]);
+  const openFoodFacts = await lookupProductByBarcode(barcode).catch(() => null);
+  const serpapi = openFoodFacts ? null : await lookupProductViaSerpApi(barcode).catch(() => null);
 
   if (!openFoodFacts && !serpapi) {
     return { resolved: null, sources: { openFoodFacts, serpapi } };
   }
 
-  if (openFoodFacts && serpapi) {
-    const merged: ScannedProduct = {
-      ...openFoodFacts,
-      category: openFoodFacts.category || serpapi.category || "Uncategorized",
-      brand: openFoodFacts.brand || serpapi.brand,
-      imageUrl: openFoodFacts.imageUrl || serpapi.imageUrl,
-      price: openFoodFacts.price ?? serpapi.price,
-      currency: openFoodFacts.currency || serpapi.currency,
-      description: openFoodFacts.description || serpapi.description,
-      referenceUrls: serpapi.referenceUrls || openFoodFacts.referenceUrls,
-      source: "openfoodfacts",
-    };
-    return { resolved: merged, sources: { openFoodFacts, serpapi } };
+  if (openFoodFacts) {
+    return { resolved: openFoodFacts, sources: { openFoodFacts, serpapi } };
   }
 
-  const resolved = openFoodFacts || serpapi;
-  return { resolved, sources: { openFoodFacts, serpapi } };
+  return { resolved: serpapi, sources: { openFoodFacts, serpapi } };
 }
 
 export async function lookupProductByBarcodeWithFallback(barcode: string): Promise<ScannedProduct | null> {

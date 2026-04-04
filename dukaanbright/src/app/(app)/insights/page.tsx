@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { resolveUserShop } from "@/lib/supabase/shopResolver";
-import { formatCurrency, formatNumber, getPriorityColor, getInsightIcon, isSafeModeEnabled } from "@/lib/utils";
+import { formatCurrency, formatNumber, getPriorityColor, getInsightIcon } from "@/lib/utils";
 import { AIInsight } from "@/types";
 
 const typeFilters = ["All", "price_increase", "price_decrease", "restock", "clearance", "trending"];
@@ -24,30 +24,100 @@ type Spotlight = {
   description: string;
 };
 
+type StarterSeed = {
+  name: string;
+  type: AIInsight["type"];
+  priority: AIInsight["priority"];
+  currentPrice: number;
+  suggestedPrice: number;
+};
+
+const STARTER_SEEDS: Record<string, StarterSeed[]> = {
+  "kirana / general store": [
+    { name: "Wheat Flour 5kg", type: "restock", priority: "high", currentPrice: 250, suggestedPrice: 289 },
+    { name: "Toor Dal 1kg", type: "trending", priority: "high", currentPrice: 145, suggestedPrice: 169 },
+    { name: "Sunflower Oil 1L", type: "restock", priority: "medium", currentPrice: 155, suggestedPrice: 179 },
+    { name: "Bath Soap 125g", type: "price_increase", priority: "medium", currentPrice: 36, suggestedPrice: 42 },
+  ],
+  "medical / pharmacy": [
+    { name: "Paracetamol 650mg", type: "restock", priority: "high", currentPrice: 28, suggestedPrice: 35 },
+    { name: "ORS Sachet", type: "trending", priority: "high", currentPrice: 18, suggestedPrice: 24 },
+    { name: "Vitamin C Tablets", type: "restock", priority: "medium", currentPrice: 75, suggestedPrice: 89 },
+    { name: "Hand Sanitizer 100ml", type: "price_increase", priority: "low", currentPrice: 48, suggestedPrice: 55 },
+  ],
+  electronics: [
+    { name: "USB-C Charging Cable", type: "restock", priority: "high", currentPrice: 120, suggestedPrice: 169 },
+    { name: "20W Mobile Charger", type: "trending", priority: "high", currentPrice: 290, suggestedPrice: 379 },
+    { name: "Wireless Mouse", type: "price_increase", priority: "medium", currentPrice: 420, suggestedPrice: 499 },
+    { name: "Power Extension Board", type: "restock", priority: "medium", currentPrice: 280, suggestedPrice: 349 },
+  ],
+  "clothes & textiles": [
+    { name: "Cotton T-Shirt", type: "restock", priority: "high", currentPrice: 240, suggestedPrice: 319 },
+    { name: "Denim Jeans", type: "trending", priority: "high", currentPrice: 780, suggestedPrice: 999 },
+    { name: "Leggings", type: "restock", priority: "medium", currentPrice: 170, suggestedPrice: 239 },
+    { name: "Kids Night Suit", type: "price_increase", priority: "medium", currentPrice: 390, suggestedPrice: 499 },
+  ],
+  "vegetables & fruits": [
+    { name: "Potato 1kg", type: "restock", priority: "high", currentPrice: 24, suggestedPrice: 30 },
+    { name: "Onion 1kg", type: "trending", priority: "high", currentPrice: 28, suggestedPrice: 36 },
+    { name: "Banana Dozen", type: "restock", priority: "medium", currentPrice: 38, suggestedPrice: 49 },
+    { name: "Tomato 1kg", type: "price_increase", priority: "medium", currentPrice: 26, suggestedPrice: 34 },
+  ],
+  "bakery / sweet shop": [
+    { name: "Milk Bread", type: "restock", priority: "high", currentPrice: 34, suggestedPrice: 45 },
+    { name: "Puff Pastry", type: "trending", priority: "high", currentPrice: 20, suggestedPrice: 30 },
+    { name: "Rasgulla Box", type: "price_increase", priority: "medium", currentPrice: 150, suggestedPrice: 189 },
+    { name: "Chocolate Pastry", type: "restock", priority: "medium", currentPrice: 55, suggestedPrice: 69 },
+  ],
+  stationery: [
+    { name: "A4 Notebook", type: "restock", priority: "high", currentPrice: 38, suggestedPrice: 49 },
+    { name: "Blue Ball Pen", type: "trending", priority: "high", currentPrice: 8, suggestedPrice: 12 },
+    { name: "Sketch Pen Pack", type: "price_increase", priority: "medium", currentPrice: 45, suggestedPrice: 59 },
+    { name: "Geometry Box", type: "restock", priority: "medium", currentPrice: 85, suggestedPrice: 109 },
+  ],
+  default: [
+    { name: "Top Fast-Moving Item", type: "restock", priority: "high", currentPrice: 100, suggestedPrice: 129 },
+    { name: "Impulse Counter Product", type: "trending", priority: "high", currentPrice: 40, suggestedPrice: 55 },
+    { name: "High Margin Product", type: "price_increase", priority: "medium", currentPrice: 150, suggestedPrice: 199 },
+    { name: "Daily Repeat Item", type: "restock", priority: "medium", currentPrice: 60, suggestedPrice: 79 },
+  ],
+};
+
+function buildStarterInsights(shopType: string | null | undefined): AIInsight[] {
+  const normalizedType = shopType?.trim().toLowerCase() ?? "";
+  const seeds = STARTER_SEEDS[normalizedType] ?? STARTER_SEEDS.default;
+
+  return seeds.map((seed, index) => {
+    const margin = seed.suggestedPrice - seed.currentPrice;
+    return {
+      id: `starter-${normalizedType || "default"}-${index}`,
+      productId: `starter-product-${index}`,
+      productName: seed.name,
+      type: seed.type,
+      recommendation: `Stock ${seed.name} and sell at ${formatCurrency(seed.suggestedPrice)}.`,
+      impact: `Starter category plan. Estimated margin per unit: ${formatCurrency(margin)}.`,
+      currentPrice: seed.currentPrice,
+      suggestedPrice: seed.suggestedPrice,
+      priority: seed.priority,
+    };
+  });
+}
+
 export default function InsightsPage() {
   const devBypassAuth = process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === "1";
   const [activeFilter, setActiveFilter] = useState("All");
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
   const [insights, setInsights] = useState<AIInsight[]>([]);
+  const [isStarterMode, setIsStarterMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [applyingId, setApplyingId] = useState<string | null>(null);
-  const [safeMode, setSafeMode] = useState(false);
-
-  useEffect(() => {
-    setSafeMode(isSafeModeEnabled());
-  }, []);
 
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
         setError(null);
-
-        if (safeMode) {
-          setLoading(false);
-          return;
-        }
 
         const supabase = createClient();
         const { data: userData } = await supabase.auth.getUser();
@@ -60,12 +130,12 @@ export default function InsightsPage() {
         }
 
         const shop = user
-          ? ((await resolveUserShop(supabase, user.id, "id")) as { id: string } | null)
+          ? ((await resolveUserShop(supabase, user.id, "id, shop_type")) as { id: string; shop_type?: string | null } | null)
           : (await supabase
               .from("shops")
-              .select("id")
+              .select("id, shop_type")
               .order("created_at", { ascending: true })
-              .maybeSingle()).data;
+              .maybeSingle()).data as { id: string; shop_type?: string | null } | null;
 
         if (!shop) {
           setError("Finish onboarding your shop to unlock insights.");
@@ -96,7 +166,11 @@ export default function InsightsPage() {
           priority: (i.priority as AIInsight["priority"]) ?? "medium",
         }));
 
-        setInsights(mapped);
+        const fallbackInsights = buildStarterInsights(shop.shop_type);
+        const shouldUseStarter = mapped.length === 0;
+
+        setIsStarterMode(shouldUseStarter);
+        setInsights(shouldUseStarter ? fallbackInsights : mapped);
       } catch (err: any) {
         console.error("Failed to load insights:", err);
         setError("We couldn’t load AI insights. Please retry.");
@@ -106,7 +180,7 @@ export default function InsightsPage() {
     };
 
     void load();
-  }, [safeMode]);
+  }, []);
 
   const filtered = useMemo(() => {
     if (activeFilter === "All") return insights;
@@ -142,6 +216,11 @@ export default function InsightsPage() {
   }, [insights]);
 
   const handleApply = async (id: string) => {
+    if (id.startsWith("starter-")) {
+      setAppliedIds((prev) => new Set([...prev, id]));
+      return;
+    }
+
     try {
       setApplyingId(id);
       const supabase = createClient();
@@ -181,7 +260,9 @@ export default function InsightsPage() {
             <p className="text-xs font-extrabold uppercase tracking-[0.25em] text-white/70">AI Insights</p>
             <h1 className="text-3xl md:text-4xl font-extrabold leading-tight">Your shop’s next best moves</h1>
             <p className="text-sm md:text-base text-white/80 max-w-2xl">
-              Live recommendations grounded in your sales and stock. Apply, adjust, and stay ahead of stockouts and margin leaks.
+              {isStarterMode
+                ? "No sales or products needed. These category-based starter tips tell you what to stock and what to sell it at."
+                : "Live recommendations grounded in your sales and stock. Apply, adjust, and stay ahead of stockouts and margin leaks."}
             </p>
           </div>
           {spotlight && (
@@ -273,9 +354,9 @@ export default function InsightsPage() {
           <div className="mx-auto w-12 h-12 rounded-full bg-surface-container flex items-center justify-center">
             <span className="material-symbols-outlined text-[28px] text-primary-container">sparkles</span>
           </div>
-          <p className="text-lg font-extrabold text-on-surface">No AI tips yet</p>
+          <p className="text-lg font-extrabold text-on-surface">No tips for this filter</p>
           <p className="text-sm font-medium text-on-surface-variant max-w-xl mx-auto">
-            Add a few sales and products, then refresh. We’ll analyze demand, margin, expiry, and pricing to surface your next best moves.
+            Switch to All, Restock, or Trending to view available suggestions.
           </p>
         </div>
       ) : (

@@ -1,10 +1,17 @@
 import { NextRequest } from "next/server";
 
-const SERPAPI_ENDPOINT = "https://serpapi.com/search.json";
-const SERPAPI_KEY = process.env.SERPAPI_API_KEY || process.env.NEXT_PUBLIC_SERPAPI_KEY;
-
 export async function GET(req: NextRequest) {
-  if (!SERPAPI_KEY) {
+  const serpApiEndpoint = process.env.SERPAPI_API_ENDPOINT;
+  const serpApiKey = process.env.SERPAPI_API_KEY || process.env.NEXT_PUBLIC_SERPAPI_KEY;
+
+  if (!serpApiEndpoint) {
+    return new Response(JSON.stringify({ error: "SerpApi endpoint missing" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  if (!serpApiKey) {
     return new Response(JSON.stringify({ error: "SerpApi key missing" }), {
       status: 400,
       headers: { "content-type": "application/json" },
@@ -12,11 +19,11 @@ export async function GET(req: NextRequest) {
   }
 
   const params = new URLSearchParams(req.nextUrl.searchParams);
-  params.set("api_key", SERPAPI_KEY);
+  params.set("api_key", serpApiKey);
   if (!params.has("engine")) params.set("engine", "google");
   if (!params.has("num")) params.set("num", "5");
 
-  const url = `${SERPAPI_ENDPOINT}?${params.toString()}`;
+  const url = `${serpApiEndpoint}?${params.toString()}`;
 
   try {
     const upstream = await fetch(url, { cache: "no-store" });

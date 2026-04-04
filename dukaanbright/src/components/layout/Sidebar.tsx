@@ -8,6 +8,7 @@ const navItems = [
   { label: "Inventory",  icon: "inventory_2",   href: "/inventory" },
   { label: "Finances",   icon: "account_balance",href: "/finances" },
   { label: "AI Insights",icon: "insights",      href: "/insights" },
+  { label: "Query",      icon: "forum",         href: "/query" },
   { label: "Add Product",icon: "add_box",        href: "/add-product" },
   { label: "Settings",   icon: "settings",       href: "/settings" },
 ];
